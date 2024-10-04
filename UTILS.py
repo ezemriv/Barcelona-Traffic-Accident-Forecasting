@@ -5,6 +5,15 @@ import seaborn as sns
 import math
 from sklearn.impute import SimpleImputer
 
+# for map rendering
+import folium
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from IPython.display import Image
+import time
+import os
+
 class InitialEDA:
     """Class for performing exploratory data analysis (EDA) on a DataFrame."""
     
@@ -64,6 +73,50 @@ class InitialEDA:
 
         plt.tight_layout()
         plt.show()
+
+    @staticmethod
+    def render_folium_map(map_object, html_path, png_path, width=1000, height=800, wait_time=5):
+        """
+        Render a Folium map as a static image and save both HTML and PNG versions.
+        
+        Parameters:
+        - map_object: A Folium map object
+        - html_path: Path to save the HTML version of the map
+        - png_path: Path to save the PNG version of the map
+        - width: Width of the browser window (default 1000)
+        - height: Height of the browser window (default 800)
+        - wait_time: Time to wait for the map to render in seconds (default 5)
+        
+        Returns:
+        - Displays the PNG image in the notebook
+        """
+        # Save the map to the specified HTML file
+        map_object.save(html_path)
+        
+        # Set up the web driver
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service)
+        
+        # Open the HTML file
+        driver.get("file://" + os.path.abspath(html_path))
+        
+        # Wait for the map to render
+        time.sleep(wait_time)
+        
+        # Set the size of the browser window
+        driver.set_window_size(width, height)
+        
+        # Capture the screenshot
+        driver.save_screenshot(png_path)
+        
+        # Close the browser
+        driver.quit()
+        
+        # Display the image in the notebook
+        display(Image(png_path))
+        
+        print(f"Check out interactive HTML map at: {html_path}")
+        print(f"PNG image saved to: {png_path}")
 
 class PreprocessingStarter(InitialEDA):
     """Class for data preprocessing tasks, inheriting from InitialEDA."""
@@ -137,3 +190,4 @@ class FeatureEngineering():
         df = pd.merge(df, grouped_df, on=merge_cols, how='left')
 
         return df
+    
