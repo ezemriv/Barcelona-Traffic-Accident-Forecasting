@@ -14,6 +14,11 @@ from IPython.display import Image
 import time
 import os
 
+# for feature engineering
+from mlforecast import MLForecast
+from window_ops.rolling import rolling_mean, rolling_std
+from mlforecast.lag_transforms import ExponentiallyWeightedMean, ExpandingMean, ExpandingStd
+
 class InitialEDA:
     """Class for performing exploratory data analysis (EDA) on a DataFrame."""
     
@@ -152,42 +157,160 @@ class PreprocessingStarter(InitialEDA):
     
 
 class FeatureEngineering():
-
-    def build_ts_features(df, cols_to_group, target_column, lags, aggfunc):
-
-        assert "ds" in df.columns.tolist(), "Date must be in df columns"
-
-        # Error control for lags
-        if not isinstance(lags, list):
-            raise ValueError("Lags should be a list of integers.")
+    
+    @staticmethod
+    def recreate_features(df):
+        df = df.copy()
+        df['day'] = df['date'].dt.day
+        df['dayofweek'] = df['date'].dt.dayofweek
+        df['namedayweek'] = df['date'].dt.day_name()  # Adding name of the day of the week
+        df['month'] = df['date'].dt.month
+        df['quarter'] = df['date'].dt.quarter
+        df['shift'] = df['unique_id'].str.split('-').str[0]
+        df['district'] = df['unique_id'].str.split('-').str[1]
         
-        # Create a new name for columns based on the grouping list
-        new_name = "_".join(cols_to_group + [target_column] + [aggfunc.__name__])
+        # cast categorical columns
+        cat_cols = ['namedayweek', 'shift', 'district']
 
-        # Set the index and perform grouping, resampling, and aggregation in one step
-        grouped_df = (
-            df.set_index("ds")
-            .groupby(cols_to_group)
-            .resample("ME")[target_column]
-            .agg(aggfunc)
-            .reset_index()
-            .rename(
-                columns = {
-                    target_column : new_name
-                }
-            )
+        for col in cat_cols:
+            if col in df.columns:
+                df[col] = df[col].astype('category')
+
+        feature_cols = [
+            'day', 
+            'dayofweek', 
+            'namedayweek', 
+            'month', 
+            'quarter', 
+            'shift', 
+            'district']
+        
+        return df, cat_cols, feature_cols
+
+    @staticmethod
+    def add_aditional_features(df):
+        df = df.copy()
+
+        holidays_2023 = [
+        '2023-01-01', '2023-01-06', '2023-04-07', '2023-04-10', '2023-05-01', '2023-06-24',
+        '2023-08-15', '2023-09-11', '2023-09-25', '2023-10-12', '2023-11-01', '2023-12-06',
+        '2023-12-08', '2023-12-25', '2023-12-26'
+        ]
+
+        # Convert holiday list to datetime format
+        holidays_2023 = pd.to_datetime(holidays_2023)
+
+        # Create 'holiday' column with 1 for holidays and 0 for non-holidays
+        df['holiday'] = df['date'].apply(lambda x: 1 if pd.to_datetime(x) in holidays_2023 else 0)
+        df['weekend'] = np.where(df['dayofweek'].isin([5, 6]), 1, 0)
+
+        # Transform 'month' into its sine and cosine representations
+        df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
+        df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
+
+        # Transform 'day' of the month into its sine and cosine representations
+        df['day_sin'] = np.sin(2 * np.pi * df['day'] / 31)
+        df['day_cos'] = np.cos(2 * np.pi * df['day'] / 31)
+
+        new_features = [
+                        'holiday', 
+                        'weekend', 
+                        'month_sin', 'month_cos',
+                        'day_sin', 'day_cos'
+                        ]
+        
+        return df, new_features
+    
+    @staticmethod
+    def ML_forecast_target_lags(df, unique_id, date_col, target_col):
+        """
+        Function to create lag features and apply specified transforms for a time series dataframe.
+        
+        Parameters:
+        df (pd.DataFrame): Input dataframe.
+        unique_id (str): Name of the unique identifier column.
+        date_col (str): Name of the date column.
+        target_col (str): Name of the target column.
+
+        Returns:
+        pd.DataFrame: Transformed dataframe with lag features and specified transforms.
+        """
+
+        # Create a copy of the dataframe and rename columns for compatibility
+        df_copy = df.copy().rename(columns={date_col: 'ds', target_col: 'y'})
+        
+        # Sort the dataframe by unique_id and date columns
+        df_sorted = df_copy.sort_values(by=[unique_id, 'ds'])
+
+        # Define the lag transforms for lags 1, 2, 7, 30
+        lag_transforms = {
+            1: [
+                (rolling_mean, 3),
+                (rolling_std, 3),
+                (rolling_mean, 7),
+                (rolling_std, 7),
+                (rolling_mean, 30),
+                (rolling_std, 30),
+                ExponentiallyWeightedMean(alpha=0.5),
+                ExponentiallyWeightedMean(alpha=0.8),
+            ],
+            2: [
+                (rolling_mean, 3),
+                (rolling_std, 3),
+                (rolling_mean, 7),
+                (rolling_std, 7),
+                (rolling_mean, 30),
+                (rolling_std, 30),
+            ],
+            7: [
+                (rolling_mean, 3),
+            ],
+            30: [
+                (rolling_mean, 3),
+            ]
+        }
+
+        # Initialize the MLForecast object with the frequency set to daily (D) and lags for 1, 2, 7, 30 days
+        ml_forecast = MLForecast(
+            models=[],  # No models needed for just feature creation
+            freq='D',   # Daily frequency
+            lags=[1, 2, 7, 30],  # Specify the lags
+            lag_transforms=lag_transforms
         )
 
-        # Generate lag and diff features for specified lags
-        for n in lags:
-                grouped_df[f'{new_name}_lag{n}'] = grouped_df.groupby(cols_to_group)[new_name].shift(n)
-        
-        print(f"Dropping columns that might cause target leakage {new_name}")
-        grouped_df.drop(new_name, inplace = True, axis = 1)
+        # Preprocess the data and create lag features with transforms
+        df_with_lags = ml_forecast.preprocess(df_sorted, id_col=unique_id, 
+                                              time_col='ds', target_col='y', 
+                                              dropna=False, static_features=[])
 
-        # Merge the generated features back into the original DataFrame
-        merge_cols = ['ds'] + cols_to_group
+        return df_with_lags.rename(columns={'ds': date_col, 'y': target_col})
+    
+    @staticmethod
+    def build_group_features(df, cols_to_group, target_column, lags, aggfunc):
+        if not isinstance(lags, list):
+            raise ValueError("Lags should be a list of integers.")
+
+        new_name = "_".join(cols_to_group + [target_column, aggfunc])
+
+        grouped_df = (
+            df.set_index("date")
+            .groupby(cols_to_group, observed=False)
+            .resample("D")[target_column]
+            .agg(aggfunc)
+            .reset_index()
+            .rename(columns={target_column: new_name})
+        )
+
+        new_group_cols = []
+        for n in lags:
+            col_name = f'{new_name}_lag{n}'
+            grouped_df[col_name] = grouped_df.groupby(cols_to_group, observed=False)[new_name].shift(n)
+            new_group_cols.append(col_name)
+
+        print(f"Dropping columns that might cause target leakage {new_name}")
+        grouped_df.drop(columns=new_name, inplace=True)
+
+        merge_cols = ['date'] + cols_to_group
         df = pd.merge(df, grouped_df, on=merge_cols, how='left')
 
-        return df
-    
+        return df, new_group_cols
