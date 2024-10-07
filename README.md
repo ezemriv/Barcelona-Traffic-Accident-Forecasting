@@ -2,7 +2,7 @@
 
 🇪🇸 **Català**
 
-# Accidents a Barcelona: Una Anàlisi Exploratori de Dades
+# Pronòstic d'Accidents de Trànsit a Barcelona
 
 ## Descripció del Projecte
 
@@ -10,7 +10,7 @@ Aquest projecte es va completar com a part del Hackathon de Ciència de Dades or
 
 🇪🇸 **Español**
 
-# Accidentes en Barcelona: Un Análisis Exploratorio de Datos
+# Pronóstico de Accidentes de Tráfico en Barcelona
 
 ## Descripción del Proyecto
 
@@ -18,7 +18,7 @@ Este proyecto se completó como parte del Hackathon de Ciencia de Datos organiza
 
 🇬🇧 **English**
 
-# Accidents in Barcelona: An Exploratory Data Analysis
+# Traffic Accident Forecasting in Barcelona
 
 ## Project Overview
 
