@@ -1,5 +1,6 @@
 # Repo folders
 /data
+/catboost_info
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
